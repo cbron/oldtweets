@@ -24,17 +24,22 @@ import math
 
 
 help_message = '''
-oldtweets.py - backup and delete your tweets older than 4 weeks ago
+oldtweets.py - backup and delete your tweets older than a certain number of days ago
 Based on a script by David Larlet @davidbgk
 
 
-* dry-run to see all tweets older than 4 weeks
+* delete to actually delete all tweets older than set amount of days
 
-    cat credentials | ./oldtweets.py --dry-run
+    cat credentials | ./oldtweets.py --delete
 
-* print *and delete from twitter* tweets older than 4 weeks (your oldest tweets will be at the top)
 
-    cat credentials | ./oldtweets.py >> mytweetsbackupfile.txt
+* set amount of days to go back, defaults to 100
+
+    cat credentials | ./oldtweets.py --days=40
+
+* print *and delete from twitter* tweets older than 40 days (your oldest tweets will be at the top)
+
+    cat credentials | ./oldtweets.py --days=40 --delete >> mytweetsbackupfile.txt
 
 * [FIXME] The tweets can still sometimes output in the wrong order, with some duplicates.
 
@@ -50,12 +55,14 @@ class Usage(Exception):
 
 
 def main(argv=None):
-    option_delete = 1 #unless you use --dry-run, we're deleting
+    option_delete = 0 #unless you use --delete, we're just printing
+    days_ago = 100 # Go 100 days back, unless specified
+
     if argv is None:
         argv = sys.argv
     try:
         try:
-            opts, args = getopt.getopt(argv[1:], "h", ["help", "dry-run"])
+            opts, args = getopt.getopt(argv[1:], "h", ["help", "delete", "days="])
         except getopt.error, msg:
             raise Usage(msg)
 
@@ -63,8 +70,13 @@ def main(argv=None):
         for option, value in opts:
             if option in ("-h", "--help"):
                 raise Usage(help_message)
-            if option == "--dry-run":
-                option_delete = 0
+            if option == "--delete":
+                option_delete = 1
+            if option == "--days":
+                days_ago = int(value)
+
+        print "Days: %s" % days_ago
+        print "Deleting: %s" % ('yes' if option_delete == 1 else "No")
 
     except Usage, err:
         print >> sys.stderr, sys.argv[0].split("/")[-1] + ": " + str(err.msg)
@@ -95,18 +107,18 @@ def main(argv=None):
     statuses = list()
     latest_tweet_id = None
     get_more = True
-    
+
     # get all the tweets
     while get_more:
         add_to_timeline = False
         if latest_tweet_id:
             add_statuses = api.GetUserTimeline(count=200, include_rts=True, max_id=latest_tweet_id)
-        else: 
-            add_statuses = api.GetUserTimeline(count=200, include_rts=True) 
+        else:
+            add_statuses = api.GetUserTimeline(count=200, include_rts=True)
         if len(add_statuses) > 0 and len(statuses) == 0 : #tweets returned, we begin the list
-            add_to_timeline = True         
+            add_to_timeline = True
         elif len(add_statuses) > 0 and (add_statuses[-1].id != statuses[-1].id): # tweets returned and it's not just the last one over and over again
-            add_to_timeline = True         
+            add_to_timeline = True
         if add_to_timeline:
             statuses = statuses + add_statuses
             latest_tweet_id = statuses[-1].id
@@ -117,19 +129,19 @@ def main(argv=None):
         time.sleep(1)
 
     start_delete_at = None
-    
-    # discard tweets posted between now and 4 weeks ago
-    fourweeksago = datetime.date.today()-datetime.timedelta(28)
+
+    # discard tweets posted between now and 100 days ago ago
+    date_to_delete = datetime.date.today()-datetime.timedelta(days_ago)
     while start_delete_at == None:
         status = statuses.pop(0)
         status_created_at = datetime.datetime.strptime(status.created_at, "%a %b %d %H:%M:%S +0000 %Y")
-        if datetime.date(status_created_at.year, status_created_at.month, status_created_at.day) < fourweeksago:
+        if datetime.date(status_created_at.year, status_created_at.month, status_created_at.day) < date_to_delete:
             start_delete_at = status.id
 
     for tweet in statuses[::-1]:
         status_created_at = datetime.datetime.strptime(tweet.created_at, "%a %b %d %H:%M:%S +0000 %Y")
         # [FIXME] Making sure not to delete new stuff, which for some odd reason seems to be necessary
-        if datetime.date(status_created_at.year, status_created_at.month, status_created_at.day) < fourweeksago:
+        if datetime.date(status_created_at.year, status_created_at.month, status_created_at.day) < date_to_delete:
             tweet_text = tweet.text.replace('\n', '').replace('\r', '')
             print "Tweet id: ", tweet.id, " --  Date: ", tweet.created_at, " || ", tweet_text.encode('utf-8')
             # delete
